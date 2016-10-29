@@ -80,30 +80,11 @@ func buildEventHandler(state *internalState) events.Handler {
 	return events.NewMux(
 		events.DefaultHandler(events.HandlerFunc(controller.DefaultHandler)),
 		events.MapFuncs(map[scheduler.Event_Type]events.HandlerFunc{
-			scheduler.Event_FAILURE: func(e *scheduler.Event) error {
-				log.Println("received a FAILURE event")
-				f := e.GetFailure()
-				failure(f.ExecutorID, f.AgentID, f.Status)
+			scheduler.Event_UNKNOWN: func(e *scheduler.Event) error {
+				log.Println("received Event_UNKNOWN")
 				return nil
 			},
-			scheduler.Event_OFFERS: func(e *scheduler.Event) error {
-				if state.config.verbose {
-					log.Println("received an OFFERS event")
-				}
-				offers := e.GetOffers().GetOffers()
-				state.metricsAPI.offersReceived.Int(len(offers))
-				resourceOffers(state, offers)
-				return nil
-			},
-			scheduler.Event_UPDATE: func(e *scheduler.Event) error {
-				if err := ack.HandleEvent(e); err != nil {
-					log.Printf("failed to ack status update for task: %+v", err)
-					// TODO(jdef) we don't return the error because that would cause the subscription
-					// to terminate; is that the right thing to do?
-				}
-				statusUpdate(state, e.GetUpdate().GetStatus())
-				return nil
-			},
+
 			scheduler.Event_SUBSCRIBED: func(e *scheduler.Event) (err error) {
 				log.Println("received a SUBSCRIBED event")
 				if state.frameworkID == "" {
@@ -117,6 +98,101 @@ func buildEventHandler(state *internalState) events.Handler {
 					}
 				}
 				return
+			},
+
+			scheduler.Event_OFFERS: func(e *scheduler.Event) error {
+				log.Println("received an OFFERS event")
+				offers := e.GetOffers().GetOffers()
+				for _, offer := range offers {
+					offerId := offer.GetID()
+					id := offerId.GetValue()
+					host := offer.GetHostname()
+					agentId := offer.GetAgentID()
+					log.Printf("offer[%s] host[%s] agent[%s] with resources", id, host, agentId.GetValue())
+					ress := offer.GetResources()
+					for _, res := range ress {
+						log.Printf("\t\tresource[%+v]", res)
+					}
+					log.Printf("offer[%s] with unavailability", id)
+					log.Printf("\t\tunavailability[%+v]", offer.GetUnavailability())
+				}
+				state.metricsAPI.offersReceived.Int(len(offers))
+				//resourceOffers(state, offers)
+				return nil
+			},
+
+			scheduler.Event_INVERSE_OFFERS: func(e *scheduler.Event) error {
+				log.Println("received an INVERSE_OFFERS event")
+				offers := e.GetInverseOffers().GetInverseOffers()
+				for _, offer := range offers {
+					offerId := offer.GetOfferID()
+					id := offerId.GetValue()
+					agentId := offer.GetAgentID()
+					var aid string
+					if agentId != nil {
+						aid = agentId.GetValue()
+					} else {
+						aid = "null"
+					}
+					log.Printf("invserse offer[%s] agent[%s] with resources", id, aid)
+					ress := offer.GetResources()
+					for _, res := range ress {
+						log.Printf("\t\tresource[%#v]", res)
+					}
+					log.Printf("offer[%s] with unavailability", id)
+					log.Printf("\t\tunavailability[%#v]", offer.GetUnavailability())
+				}
+				return nil
+			},
+
+			scheduler.Event_RESCIND: func(e *scheduler.Event) error {
+				log.Println("received an RESCIND event")
+				rescind := e.GetRescind()
+				offerId := rescind.GetOfferID()
+				id := offerId.GetValue()
+				log.Printf("rescind offer[%s]", id)
+				return nil
+			},
+
+			scheduler.Event_RESCIND_INVERSE_OFFER: func(e *scheduler.Event) error {
+				log.Println("received RESCIND_INVERSE_OFFER event")
+				offerId := e.GetRescindInverseOffer().GetInverseOfferID()
+				id := offerId.GetValue()
+				log.Printf("rescind offer[%s]", id)
+				return nil
+			},
+
+			scheduler.Event_UPDATE: func(e *scheduler.Event) error {
+				log.Println("received UPDATE event")
+				if err := ack.HandleEvent(e); err != nil {
+					log.Printf("failed to ack status update for task: %+v", err)
+					// TODO(jdef) we don't return the error because that would cause the subscription
+					// to terminate; is that the right thing to do?
+				}
+				statusUpdate(state, e.GetUpdate().GetStatus())
+				return nil
+			},
+
+			scheduler.Event_MESSAGE: func(e *scheduler.Event) error {
+				log.Println("received MESSAGE event")
+				return nil
+			},
+
+			scheduler.Event_FAILURE: func(e *scheduler.Event) error {
+				log.Println("received a FAILURE event")
+				f := e.GetFailure()
+				failure(f.ExecutorID, f.AgentID, f.Status)
+				return nil
+			},
+
+			scheduler.Event_ERROR: func(e *scheduler.Event) error {
+				log.Println("received ERROR event")
+				return nil
+			},
+
+			scheduler.Event_HEARTBEAT: func(e *scheduler.Event) error {
+				log.Println("received HEARTBEAT event")
+				return nil
 			},
 		}),
 	)
